@@ -746,7 +746,8 @@ public partial class Instances
 		instance.PrefabInstance.RefreshPatch();
 
 		// Revert instance to prefab
-		EditorUtility.Prefabs.RevertInstanceToPrefab( instance );
+		Assert.IsTrue( instance.IsPrefabInstanceRoot, "Instance should be a prefab instance root." );
+		EditorUtility.Prefabs.RevertGameObjectInstanceChanges( instance );
 
 		// Assert that transform, name, and flags are not reverted
 		Assert.AreEqual( new Transform( new Vector3( 100, 200, 300 ), Rotation.FromYaw( 45 ), Vector3.One ), instance.LocalTransform );
@@ -1037,6 +1038,53 @@ public partial class Instances
 		// 5. The outer scene instance GUID must also be unchanged
 		Assert.AreEqual( outerInstanceGuid, outerInstance.Id,
 			"Scene instance GUID must not be randomised after writing a nested prefab root" );
+
+	}
+
+	/// <summary>
+	/// Regression: RevertInstanceToPrefab on a nested prefab instance root was clearing the
+	/// ENTIRE outermost patch (ClearPatch), which wiped overrides on unrelated objects.
+	/// Nested roots should only revert their own changes, leaving the outermost patch intact.
+	/// </summary>
+	[TestMethod]
+	public void RevertInstanceToPrefab_OnNestedRoot_PreservesOutermostOverrides()
+	{
+		// 1. Register 3-level nested prefab
+		using var nnPrefab = Sandbox.SceneTests.Helpers.RegisterPrefabFromJson( "__rvt_nn.prefab", _nestedNestedPrefabSource );
+		using var nPrefab = Sandbox.SceneTests.Helpers.RegisterPrefabFromJson( "__rvt_n.prefab", _nestedPrefabSource.Replace( "__nested_nested.prefab", "__rvt_nn.prefab" ) );
+		using var bPrefab = Sandbox.SceneTests.Helpers.RegisterPrefabFromJson( "__rvt_b.prefab", _basePrefabSource.Replace( "__nested.prefab", "__rvt_n.prefab" ) );
+
+		var basePrefabFile = ResourceLibrary.Get<PrefabFile>( "__rvt_b.prefab" );
+		var basePrefabScene = SceneUtility.GetPrefabScene( basePrefabFile );
+
+		// 2. Instantiate and make an override on the outermost root's component
+		var scene = new Scene();
+		using var sceneScope = scene.Push();
+		var outerInstance = basePrefabScene.Clone( Vector3.Zero );
+
+		Assert.IsTrue( outerInstance.IsOutermostPrefabInstanceRoot );
+		var renderer = outerInstance.Components.Get<ModelRenderer>();
+		Assert.IsNotNull( renderer );
+
+		// Override the outermost root's Tint to Blue (prefab default is Red)
+		renderer.Tint = Color.Blue;
+		outerInstance.PrefabInstance.RefreshPatch();
+		Assert.IsTrue( outerInstance.PrefabInstance.IsModified(), "Outermost should have overrides after modifying Tint" );
+
+		// 3. Revert the NESTED (middle) instance root — this must NOT touch the outermost patch
+		var middleInstance = outerInstance.Children[0];
+		Assert.IsTrue( middleInstance.IsNestedPrefabInstanceRoot );
+		EditorUtility.Prefabs.RevertGameObjectInstanceChanges( middleInstance );
+
+		// 4. The outermost root's Tint override must still be Blue
+		var rendererAfter = outerInstance.Components.Get<ModelRenderer>();
+		Assert.IsNotNull( rendererAfter );
+		Assert.AreEqual( Color.Blue, rendererAfter.Tint,
+			"Outermost root's Tint override should be preserved after reverting a nested instance" );
+
+		// The outermost patch should still report as modified
+		Assert.IsTrue( outerInstance.PrefabInstance.IsModified(),
+			"Outermost patch should still contain overrides after reverting a nested root" );
 	}
 
 	// Innermost prefab definition

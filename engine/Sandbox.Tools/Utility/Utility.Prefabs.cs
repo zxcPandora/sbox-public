@@ -196,6 +196,13 @@ public static partial class EditorUtility
 			if ( !go.IsValid() ) return;
 			if ( !go.IsPrefabInstance ) return;
 
+			if ( go.IsOutermostPrefabInstanceRoot )
+			{
+				go.PrefabInstance.ClearPatch( true );
+				go.UpdateFromPrefab();
+				return;
+			}
+
 			go.OutermostPrefabInstanceRoot.PrefabInstance.RevertGameObjectChanges( go );
 		}
 
@@ -274,20 +281,6 @@ public static partial class EditorUtility
 			UpdatePrefabAfterModification( go.OutermostPrefabInstanceRoot.PrefabInstanceSource );
 
 			EditorUtility.InspectorObject = session.Scene.Directory.FindByGuid( goId );
-		}
-
-		/// <summary>
-		/// Revert a prefab instance to the state of the prefab.
-		/// </summary>
-		public static void RevertInstanceToPrefab( GameObject go )
-		{
-			if ( !go.IsPrefabInstance )
-			{
-				return;
-			}
-
-			go.OutermostPrefabInstanceRoot.PrefabInstance.ClearPatch( true );
-			go.UpdateFromPrefab();
 		}
 
 		/// <summary>
